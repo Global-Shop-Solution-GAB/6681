@@ -1,0 +1,98 @@
+Program.Sub.Preflight.Start
+	V.Global.sErrorLogFilename.Declare
+	V.Global.iCon.Declare(Long,0)
+Program.Sub.Preflight.End
+
+Program.Sub.Main.Start
+Function.Intrinsic.UI.UsePixels ' Allows you to use Pixels instead of Twips throughout
+
+F.Intrinsic.Control.Try
+	V.Local.sInventoryBrowserFilename.Declare
+	V.Local.sBomBrowserFilename.Declare
+	V.Local.sOpCodeBrowserFilename.Declare
+	V.Local.sQuery.Declare
+	V.Local.bUseRevision.Declare
+	V.Local.iRet.Declare
+	V.Local.sPartSimFileName.Declare
+
+	'Create Object Database connection
+	F.Global.Object.CreateDB("oDatabase",V.Caller.CompanyCode,V.Ambient.DBServerName,True,v.Global.iCon)
+	
+	F.ODBC.Connection!con.OpenCompanyConnection(600)
+	
+	'Set Log file Path Directory & Filename
+	F.Intrinsic.String.Build("{0}\{1}",V.Caller.LocalGSSTempDir,"GCG_6681_Error.log",V.Global.sErrorLogFilename)
+	
+	'Set the filename for the XML filenames
+	F.Intrinsic.String.Build("{0}GCG_6681_InventoryBrowser_{1}.xml",V.Caller.GasDir,V.Caller.CompanyCode,V.Local.sInventoryBrowserFilename)
+	F.Intrinsic.String.Build("{0}GCG_6681_PartSim_{1}.xml",V.Caller.GasDir,V.Caller.CompanyCode,V.Local.sPartSimFileName)
+	
+	'Generate InventoryBrowser XML file
+	f.Global.Object.Create("oParts","Inventory.Parts","oDatabase",V.Global.iCon,True)
+	f.Global.Object.Create("oExtraTextParts","Inventory.Support.ExtraTexts","oDatabase",V.Global.iCon,True)
+	f.Data.Linq.Join("LEFTJOIN","OBJECT","oParts*!*P",1286,"","","~~~~~~~~~~~~~~~~~","~~~","OBJECT","oExtraTextParts*!*E",3,"","","~~~~~~~~~~~~~~~~~","~~~","P.PartNumber = E.PartNumber AND P.PartNumberRevision = E.PartNumberRevision","P.PartNumber As Part*!*P.PartNumberRevision As PartRev*!*P.LocationCode As PartLoc*!*P.Information.ProductLine.ProductLineCode As ProdLine*!*P.Description.Primary As Description*!*P.Description.Alternate1 As Description1*!*P.Description.Alternate2 As Description2*!*E.Information.Comment As Text*!*P.Information.UnitOfMeasure.UnitOfMeasureCode As UM_INVENTORY*!*P.InventoryStatus.OnHand As OnHand_Qty*!*P.Scheduling.LeadTime As LeadTime*!*P.Cost.MonetaryValue.Company.Unit As Cost*!*P.Cost.Alternate.MonetaryValue.Company.Unit As AltCost","","","","dtInventoryBrowser",True)
+	f.Global.Object.Dispose("oParts")
+	f.Global.Object.Dispose("oExtraTextParts")
+	F.Data.DataTable.SaveToXML("dtInventoryBrowser",0,True,V.Local.sInventoryBrowserFilename)
+	F.Data.DataTable.Close("dtInventoryBrowser")
+	
+	V.Local.sQuery.Set("Select B.Part as PartNo, Case When Length(PartSim) > 17 Then Left(PartSim,17) Else PartSim End as Part, Case When Length(PartSim) > 17 Then Right(PartSim,3) Else ' ' End as PartRev, B.Location as PartLoc, Description, Description_2 as Description1, Description_3 as Descpription2, D.Text, B.UM_Inventory, B.Qty_OnHand as OnHand_Qty, Time_Material_Lead as LeadTime, B.Amt_Cost as Cost, Amt_Alt_Cost as AltCost From GCG_6681_INV_SIMPART A Join V_Inventory_Mstr B on A.Part = B.Part Left Join V_Inventory_Mst2 C on B.Part = C.Part Left Join V_Inv_Extra_Text D on B.Part = D.Part Order by PartSim")
+	F.Data.DataTable.CreateFromSQL("dtPartSim","con",V.Local.sQuery,True)
+	F.Data.DataTable.SaveToXML("dtPartSim",0,True,V.Local.sPartSimFileName)
+	F.Data.DataTable.Close("dtPartSim")
+	
+	F.ODBC.Connection!con.close
+	
+	F.Intrinsic.Control.End
+
+F.Intrinsic.Control.Catch
+	F.Intrinsic.Control.CallSub(WriteErrorMessage,"ScriptPath",V.Ambient.ScriptPath,"Subroutine",V.Ambient.CurrentSubroutine,"ErrorTimeStamp",V.Ambient.Now,"ErrorNumber",V.Ambient.ErrorNumber,"ErrorDescription",V.Ambient.ErrorDescription)
+F.Intrinsic.Control.EndTry
+Program.Sub.Main.End
+
+Program.Sub.WriteErrorMessage.Start
+F.Intrinsic.Control.Try
+	V.Local.bFileExists.Declare(Boolean)
+	V.Local.sErrorMessage.Declare(String)
+	V.Local.iFileSize.Declare(Long)
+	
+	F.Intrinsic.Control.If(V.ODBC.con.State,=,1)
+		F.ODBC.Connection!con.close
+	F.Intrinsic.Control.EndIf
+	
+	'Format the Error Message
+	F.Intrinsic.String.Build("Error Time: {0}{1}",V.Args.ErrorTimeStamp,V.Ambient.NewLine,V.Local.sErrorMessage)
+	F.Intrinsic.String.Build("{0}Script Path: {1}{2}",V.Local.sErrorMessage,V.Args.ScriptPath,V.Ambient.NewLine,V.Local.sErrorMessage)
+	F.Intrinsic.String.Build("{0}Subroutine: {1}{2}",V.Local.sErrorMessage,V.Args.Subroutine,V.Ambient.NewLine,V.Local.sErrorMessage)
+	F.Intrinsic.String.Build("{0}Error Number: {1}{2}",V.Local.sErrorMessage,V.Args.ErrorNumber,V.Ambient.NewLine,V.Local.sErrorMessage)
+	F.Intrinsic.String.Build("{0}Error Description: {1}{2}",V.Local.sErrorMessage,V.Args.ErrorDescription,V.Ambient.NewLine,V.Local.sErrorMessage)
+	F.Intrinsic.String.Build("{0}========================{1}",V.Local.sErrorMessage,V.Ambient.NewLine,V.Local.sErrorMessage)
+
+	'Check whether the error log file exists.
+	F.Intrinsic.File.Exists(V.Global.sErrorLogFilename,V.Local.bFileExists)
+	F.Intrinsic.Control.If(V.Local.bFileExists)
+		F.Intrinsic.File.GetFileSize(V.Global.sErrorLogFilename,V.Local.iFileSize)
+		F.Intrinsic.Control.If(V.Local.iFileSize,>,50000000)	'50 MB
+			F.Intrinsic.File.DeleteFile(V.Global.sErrorLogFilename)
+			F.Intrinsic.File.String2File(V.Global.sErrorLogFilename,V.Local.sErrorMessage)
+			F.Intrinsic.Control.End		
+		F.Intrinsic.Control.Else
+			F.Intrinsic.File.Append2File(V.Global.sErrorLogFilename,V.Local.sErrorMessage)
+			F.Intrinsic.Control.End
+		F.Intrinsic.Control.EndIf
+	F.Intrinsic.Control.Else
+		F.Intrinsic.File.String2File(V.Global.sErrorLogFilename,V.Local.sErrorMessage)
+		F.Intrinsic.Control.End		
+	F.Intrinsic.Control.EndIf
+	
+	F.Intrinsic.Control.End
+	
+F.Intrinsic.Control.Catch
+	F.Intrinsic.Control.End
+F.Intrinsic.Control.EndTry
+Program.Sub.WriteErrorMessage.End
+
+Program.Sub.Comments.Start
+${$5$}$3.0.0.0$}$1
+${$6$}$tdjohan$}$20210422130033817$}$8rAQhOSvlohpQhMDm1j544LwmwXnRbkhkwTE0R5i6n76ARVe+8KVt52GpMcZfrQkB/Ayzpf2TO8=
+Program.Sub.Comments.End
